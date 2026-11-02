@@ -1,22 +1,29 @@
-"""Živá kontrola serveru proti testovacímu (skrytému) produktu 92025 na footic.cz."""
+"""Živá kontrola serveru na testovacím produktu (ideálně skrytém) – zapisuje a vrací interní poznámku produktu a poznámku prvního kupónu.
+
+Nastav: SHOPTET_ENV_FILE (nebo proměnné), SHOPTET_TEST_PRODUCT_ID, SHOPTET_TEST_PRODUCT_CODE (kód/prefix jen tohoto produktu),
+SHOPTET_TEST_PRODUCT_NAME (začátek názvu), SHOPTET_TEST_BRAND (značka produktu), volitelně SHOPTET_TEST_HIDDEN=0, pokud produkt není skrytý.
+"""
 import os
-os.environ.setdefault("SHOPTET_ADMIN_URL", "https://www.footic.cz")
 import server as S
 
-PID = 92025
-found = S.product_find(code="10269")
+PID = int(os.environ["SHOPTET_TEST_PRODUCT_ID"]); CODE = os.environ["SHOPTET_TEST_PRODUCT_CODE"]
+NAME = os.environ["SHOPTET_TEST_PRODUCT_NAME"]; BRAND = os.environ["SHOPTET_TEST_BRAND"]
+HIDDEN = os.environ.get("SHOPTET_TEST_HIDDEN", "1") == "1"
+found = S.product_find(code=CODE)
 assert [p["id"] for p in found["items"]] == [PID] and found["total"] == 1, found
-assert found["items"][0]["name"].startswith("boty Zaqq") and found["items"][0]["brand"] == "ZAQQ", found
+assert found["items"][0]["name"].startswith(NAME) and found["items"][0]["brand"] == BRAND, found
 assert S.product_find(name="nic-takoveho-neexistuje-xyz")["items"] == []
-assert [p["id"] for p in S.product_find(code="10269", visibility="Skrytý")["items"]] == [PID]
-assert S.product_find(code="10269", visibility="Viditelný")["items"] == []
+vis = S.filter_options()["visibility"]
+hidden_id = next(k for k, v in vis.items() if v.startswith("Skryt")); visible_id = next(k for k, v in vis.items() if v.startswith("Viditeln"))
+assert [p["id"] for p in S.product_find(code=CODE, visibility=hidden_id if HIDDEN else visible_id)["items"]] == [PID]
+assert S.product_find(code=CODE, visibility=visible_id if HIDDEN else hidden_id)["items"] == []
 fo = S.filter_options()
-assert "ZAQQ" in fo["brand"].values() and fo["availability_sold_out"], list(fo)
+assert BRAND in fo["brand"].values() and fo["availability_sold_out"], list(fo)
 try:
     S.product_find(brand="neexistujici-znacka"); assert False
 except ValueError:
     pass
-big = S.product_find(name="boty", max_pages=2)
+big = S.product_find(name=NAME.split()[0], max_pages=2)
 assert big["total"] >= big["loaded"] > 0, (big["total"], big["loaded"])
 
 p = S.product_get(PID)
@@ -29,9 +36,11 @@ assert r["diff"] == {"internalNote": {"before": f["internalNote"], "after": "TES
 r = S.product_update(PID, {"internalNote": f["internalNote"]})
 assert r["diff"]["internalNote"]["after"] == f["internalNote"] and not r["errors"], r
 
-plan = S.products_bulk_update([PID], {"variantAvailabilityId[*]": "-1"}, {"variantAvailabilityId[*]": "-2"})
-assert plan["planned_total"] == 5 and not plan["apply"] and all(k.startswith("variantAvailabilityId[") for k in plan["report"][0]["fields"]), plan
-assert S.products_bulk_update([PID], {"variantAvailabilityId[*]": "-1"}, {"variantAvailabilityId[*]": "-5"})["planned_total"] == 0
+n_var = len([k for k in f if k.startswith("variantAvailabilityId[")])
+cur = next(v for k, v in f.items() if k.startswith("variantAvailabilityId["))
+plan = S.products_bulk_update([PID], {"variantAvailabilityId[*]": "-1"}, {"variantAvailabilityId[*]": cur})
+assert 0 < plan["planned_total"] <= n_var and not plan["apply"] and all(k.startswith("variantAvailabilityId[") for k in plan["report"][0]["fields"]), plan
+assert S.products_bulk_update([PID], {"variantAvailabilityId[*]": "-1"}, {"variantAvailabilityId[*]": "neexistuje"})["planned_total"] == 0
 r = S.products_bulk_update([PID], {"internalNote": "TEST bulk"}, apply=True)["report"][0]
 assert r["applied"] == 1 and not r["unapplied"] and not r["errors"], r
 r = S.products_bulk_update([PID], {"internalNote": f["internalNote"]}, apply=True)["report"][0]
