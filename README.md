@@ -1,5 +1,7 @@
 # shoptet-admin – MCP server pro správu Shoptet e-shopu bez Premium API
 
+> **EN:** MCP server that manages a [Shoptet](https://www.shoptet.cz) e-shop through its administration UI, so it works on every plan without the Premium API. Tools cover products and variants (availability, stock, categories), bulk updates, any admin form (pages, articles, categories, brands, coupons), the file manager, SFTP, catalogue export and CSV import. Works with Claude Code, Claude Desktop and, in remote HTTP mode, ChatGPT or any MCP client. Documentation and tool descriptions are in Czech, the language of the platform. Use at your own risk: every write changes a live shop. MIT licence.
+
 MCP server, který ovládá Shoptet e-shop přes jeho **administraci**, stejně jako by v ní klikal člověk. Funguje na všech tarifech, nepotřebuje Premium ani API doplněk. Umí to, co oficiální Shoptet MCP neumí: dostupnosti variant, zařazení produktu do více kategorií, hromadné změny přes filtr, libovolný formulář adminu (stránky, články, kategorie, značky, kupóny), správce souborů, SFTP, export katalogu a CSV import.
 
 Funguje s Claude Code, Claude Desktop a (ve vzdáleném režimu) s ChatGPT nebo jiným klientem, který umí MCP přes HTTP.
@@ -99,7 +101,7 @@ Pole mají jména z admin formuláře. Nejdůležitější:
 
 ### Hromadná změna
 
-1. `product_find(brand="Fooz", visibility="Viditelný")` nebo `products_export` pro celý katalog.
+1. `product_find(brand="Značka", visibility="Viditelný")` nebo `products_export` pro celý katalog.
 2. `products_bulk_update(ids, {"variantAvailabilityId[*]": "14"}, {"variantAvailabilityId[*]": "-4"})` → plán, kolik produktů a variant se změní.
 3. Totéž s `apply=True`. V hlášení musí být `unapplied` a `errors` prázdné.
 
@@ -129,6 +131,10 @@ Párování existujících produktů podle `code` + `pairCode` (hodnoty vezmi z 
 ```
 SHOPTET_ENV_FILE=... SHOPTET_TEST_PRODUCT_ID=123 SHOPTET_TEST_PRODUCT_CODE=ABC SHOPTET_TEST_PRODUCT_NAME="začátek názvu" SHOPTET_TEST_BRAND="Značka" uv run --with mcp --with requests --with beautifulsoup4 --with paramiko python check.py
 ```
+
+## Licence a přispívání
+
+MIT (viz `LICENSE`). Autor: David Zelenka. Chyby a nápady posílej jako issue; než pošleš pull request, pusť `check.py` proti vlastnímu testovacímu produktu. Projekt není nijak spojený se společností Shoptet.
 
 ## Omezení
 
