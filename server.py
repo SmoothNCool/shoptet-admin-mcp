@@ -186,9 +186,30 @@ def product_find(code: str = "", name: str = "", brand: str = "", category: str 
 
 
 def safe_path(path):
-    if not path.startswith("/admin/") or "action=" in path:
-        raise ValueError("cesta musí začínat /admin/ a nesmí obsahovat action= (odkazy na mazání/přepínání)")
+    """Jen cesty v adminu bez parametru action (mazání/přepínání jde v adminu přes GET s action=...)."""
+    from urllib.parse import urlsplit, parse_qsl, unquote
+    u = urlsplit(path)
+    keys = {unquote(k).strip().lower() for k, _ in parse_qsl(u.query, keep_blank_values=True)}
+    if u.scheme or u.netloc or not u.path.startswith("/admin/") or ".." in u.path or "action" in keys:
+        raise ValueError("cesta musí začínat /admin/ a nesmí obsahovat parametr action (odkazy na mazání/přepínání)")
     return path
+
+
+def safe_local(path):
+    """Soubor k nahrání: nikdy nic ze složky s přístupy, z ~/.ssh ani .env soubory."""
+    src = pathlib.Path(path).resolve()
+    for forbidden in (SECRETS.parent.resolve(), (pathlib.Path.home() / ".ssh").resolve()):
+        if src == forbidden or forbidden in src.parents:
+            raise ValueError(f"soubor z {forbidden} se nahrávat nesmí")
+    if src.name.startswith(".env") or not src.is_file():
+        raise ValueError("nahrát lze jen existující běžný soubor, ne .env")
+    return src
+
+
+def safe_name(name):
+    if "/" in name or chr(92) in name or name in (".", "..") or name.startswith("."):
+        raise ValueError(f"neplatný název souboru: {name!r}")
+    return name
 
 
 def form_get(path, with_options=True):
@@ -374,7 +395,8 @@ def files_upload(local_path: str, folder: str = "") -> dict:
     dz = fm_dialog(folder).find("form", id="myAwesomeDropzone")
     data = {i["name"]: i.get("value", "") for i in dz.find_all("input") if i.get("name") and i.get("type") not in ("file", "submit")}
     data["fldr"] = folder
-    src = pathlib.Path(local_path)
+    src = safe_local(local_path)
+    safe_name(src.name)
     with src.open("rb") as fh:
         r = admin.s.post(SHOP + FM + "upload.php", data=data, files={"file": (src.name, fh)},
                          headers={"Referer": SHOP + FM + "dialog.php"})
@@ -418,15 +440,22 @@ SFTP_PREFIX = {"littleshoes.cz": "LSCZ", "littleshoes.sk": "LSSK", "footic.cz": 
                "footic.pl": "FOOTICPL", "footic.com": "FOOTICCOM"}
 
 
+# otisk ed25519 klíče ftp.myshoptet.com (admin: Nastavení -> Hosting -> FTP); jiný klíč = nepřipojovat
+SFTP_HOST_KEY_SHA256 = os.environ.get("SHOPTET_SFTP_HOST_KEY_SHA256", "bNX2DEUrb+uve8s22CVEa8Z1dzLAjUZKQXEpj5wLOxU")
+
+
 def sftp_client():
-    import paramiko
+    import paramiko, hashlib, base64
     pre = SFTP_PREFIX[SHOP.replace("https://www.", "")]
     host = setting(f"{pre}_FTP_HOST").replace("sftp://", "").replace("ftp://", "")
-    c = paramiko.SSHClient()
-    c.load_system_host_keys()
-    c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    c.connect(host, 22, username=setting(f"{pre}_FTP_USER"), password=setting(f"{pre}_FTP_PASS"), look_for_keys=False, allow_agent=False)
-    return c, c.open_sftp()
+    t = paramiko.Transport((host, 22))
+    t.start_client()
+    got = base64.b64encode(hashlib.sha256(t.get_remote_server_key().asbytes()).digest()).decode().rstrip("=")
+    if got != SFTP_HOST_KEY_SHA256:
+        t.close()
+        raise RuntimeError(f"SFTP klíč serveru nesedí ({got}), možný MITM – ověř otisk v adminu a nastav SHOPTET_SFTP_HOST_KEY_SHA256")
+    t.auth_password(setting(f"{pre}_FTP_USER"), setting(f"{pre}_FTP_PASS"))
+    return t, paramiko.SFTPClient.from_transport(t)
 
 
 @server.tool()
@@ -447,9 +476,12 @@ def sftp_list(folder: str = "upload") -> dict:
 def sftp_upload(local_path: str, remote_folder: str = "upload", remote_name: str = "") -> dict:
     """Nahraje lokální soubor přes SFTP do složky e-shopu (výchozí "upload" = Správce souborů; podsložky jako "upload/Fooz").
     Složka musí existovat. Vrací veřejnou URL a velikost ověřenou po nahrání."""
-    src = pathlib.Path(local_path)
-    name = remote_name or src.name
-    remote = remote_folder.strip("/") + "/" + name
+    src = safe_local(local_path)
+    name = safe_name(remote_name or src.name)
+    folder = remote_folder.strip("/")
+    if ".." in folder.split("/"):
+        raise ValueError("remote_folder nesmí obsahovat ..")
+    remote = folder + "/" + name
     c, s = sftp_client()
     try:
         s.put(str(src), remote)

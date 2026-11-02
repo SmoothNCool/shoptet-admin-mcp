@@ -48,6 +48,11 @@ claude mcp add shoptet-admin-footic-cz -s user -e SHOPTET_ADMIN_URL=https://www.
 ## Kontrola
 `uv run --system-certs --with mcp --with requests --with beautifulsoup4 --with paramiko python check.py` – živý test na footic.cz: skrytý produkt 92025 (find s filtry, get, zápis a návrat interní poznámky, bulk), admin_list/admin_form (uložení stránky a kategorie beze změny = prázdný diff, zápis a návrat poznámky kupónu), validace.
 
+## Bezpečnostní pojistky
+- Cesty do adminu musí začínat `/admin/` a nesmí nést parametr `action` (po dekódování, bez ohledu na velikost písmen) – tudy jdou v adminu mazání a přepínání.
+- Nahrávat (správce souborů i SFTP) lze jen existující běžný soubor mimo složku s přístupy (`C:\Data\secrets`), mimo `~/.ssh` a ne `.env*`; název bez lomítek a teček na začátku, `remote_folder` bez `..`.
+- SFTP ověřuje otisk klíče serveru (`SHOPTET_SFTP_HOST_KEY_SHA256`, výchozí = ftp.myshoptet.com z adminu); při neshodě se nepřipojí.
+
 ## Omezení
 - Nevytváří produkty, varianty ani parametry (v adminu je generuje JS). Obrázky, objednávky a kategorie samotné řeší oficiální MCP.
 - Ukládá celý formulář: u polí, která admin plní jen skriptem, by se hodnota mohla ztratit – proto se po každém uložení vrací diff.
