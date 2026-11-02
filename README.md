@@ -35,8 +35,10 @@ Zkopíruj `.env.example` do vlastního souboru **mimo repozitář** (třeba `C:\
 | `SHOPTET_SFTP_HOST_KEY_SHA256` | ne | otisk klíče SFTP serveru; výchozí platí pro `ftp.myshoptet.com`, při neshodě se server nepřipojí |
 | `SHOPTET_EXPORT_DIR` | ne | složka pro exporty katalogu (výchozí `~/Downloads/shoptet-export`) |
 | `SHOPTET_MCP_TRANSPORT` | ne | `stdio` (výchozí) nebo `http` pro vzdálený režim |
-| `SHOPTET_MCP_HOST`, `SHOPTET_MCP_PORT`, `SHOPTET_MCP_PATH` | ne | nastavení HTTP režimu (výchozí `127.0.0.1`, `8765`, `/mcp`) |
-| `SHOPTET_MCP_ALLOWED_HOSTS` | ne | povolené hodnoty hlavičky Host v HTTP režimu (hostname tunelu); prázdné = kontrola vypnutá |
+| `SHOPTET_MCP_HOST`, `SHOPTET_MCP_PORT`, `SHOPTET_MCP_PATH` | v HTTP režimu cesta ano | adresa, port a tajná cesta HTTP režimu (`/` + aspoň 32 náhodných znaků; bez ní server nenastartuje) |
+| `SHOPTET_MCP_ALLOWED_HOSTS` | ne | hostname tunelu pro HTTP režim; localhost je povolený vždy, ostatní hlavičky Host server odmítá |
+| `SHOPTET_MCP_TOKEN` | ne | Bearer token pro HTTP režim (klienti, které umí hlavičky) |
+| `SHOPTET_UPLOAD_DIR` | v HTTP režimu ano | jediná složka, ze které smí server nahrávat a importovat soubory |
 
 ## Připojení ke klientům
 
@@ -66,9 +68,9 @@ Do `claude_desktop_config.json` (Nastavení → Developer → Edit Config):
 
 ChatGPT umí MCP jen jako **vzdálený server přes HTTPS** (zapíná se v Nastavení → Konektory → Developer mode; dostupné na tarifech Plus/Pro/Business/Enterprise). Postup:
 
-1. Do konfigurace přidej `SHOPTET_MCP_TRANSPORT=http` a `SHOPTET_MCP_PATH=/mcp-` plus dlouhý náhodný řetězec (ta cesta je jediná ochrana, ChatGPT neumí k vlastnímu serveru poslat heslo ani token). Spusť server stejným příkazem jako výše, poběží na `http://127.0.0.1:8765<cesta>`.
-2. Vystav ho na HTTPS tunelem, např. `cloudflared tunnel --url http://127.0.0.1:8765` nebo `ngrok http 8765`. Hostname tunelu dej do `SHOPTET_MCP_ALLOWED_HOSTS`.
-3. V ChatGPT vytvoř konektor: URL = adresa tunelu + tajná cesta, autentizace „žádná“.
+1. Do konfigurace přidej `SHOPTET_MCP_TRANSPORT=http`, `SHOPTET_MCP_PATH=/` + aspoň 32 náhodných znaků (bez toho server odmítne nastartovat; ta cesta je jediná ochrana, protože ChatGPT neumí k vlastnímu serveru poslat token) a `SHOPTET_UPLOAD_DIR` se složkou, ze které smí server nahrávat a importovat (jiné soubory ve vzdáleném režimu odmítne). Spusť server stejným příkazem jako výše, poběží na `http://127.0.0.1:8765<cesta>`.
+2. Vystav ho na HTTPS tunelem, např. `cloudflared tunnel --url http://127.0.0.1:8765` nebo `ngrok http 8765`. Hostname tunelu dej do `SHOPTET_MCP_ALLOWED_HOSTS`, jiné hlavičky Host server odmítá (ochrana proti DNS rebindingu je vždy zapnutá).
+3. V ChatGPT vytvoř konektor: URL = adresa tunelu + tajná cesta, autentizace „žádná“. Klient, který umí hlavičky, může navíc posílat `Authorization: Bearer` s hodnotou `SHOPTET_MCP_TOKEN`.
 4. Tunel i server vypni, když je nepoužíváš. Kdo zná URL, ovládá tvůj e-shop.
 
 Stejnou adresu použije kterýkoli jiný klient s podporou MCP přes streamable HTTP.
@@ -122,7 +124,7 @@ Párování existujících produktů podle `code` + `pairCode` (hodnoty vezmi z 
 - Cesty do adminu musí začínat `/admin/` a nesmí nést parametr `action` (po dekódování, bez ohledu na velikost písmen).
 - Nahrávat lze jen existující běžný soubor mimo složku se `SHOPTET_ENV_FILE`, mimo `~/.ssh` a ne `.env*`; název bez lomítek a teček na začátku, cílová složka bez `..`.
 - SFTP ověřuje otisk klíče serveru; při neshodě se nepřipojí.
-- V HTTP režimu chrání server jen tajná cesta a volitelná kontrola hlavičky Host. Nikdy ho nevystavuj bez tunelu s HTTPS.
+- HTTP režim nenastartuje bez dlouhé tajné cesty, volitelně vyžaduje Bearer token, odmítá cizí hlavičky Host a nahrává jen z `SHOPTET_UPLOAD_DIR`. Nikdy ho nevystavuj bez tunelu s HTTPS.
 
 ## Kontrola po změně kódu
 

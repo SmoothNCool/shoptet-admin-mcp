@@ -198,9 +198,18 @@ def safe_path(path):
     return path
 
 
+REMOTE = setting("SHOPTET_MCP_TRANSPORT", "stdio") == "http"
+UPLOAD_DIR = pathlib.Path(setting("SHOPTET_UPLOAD_DIR", "-")).resolve() if setting("SHOPTET_UPLOAD_DIR", "-") != "-" else None
+
+
 def safe_local(path):
-    """Soubor k nahrání: nikdy nic ze složky se SHOPTET_ENV_FILE, z ~/.ssh ani .env soubory."""
+    """Soubor k nahrání: jen z SHOPTET_UPLOAD_DIR (je-li nastavená; ve vzdáleném režimu povinná), nikdy ze složky
+    se SHOPTET_ENV_FILE, z ~/.ssh ani .env soubory."""
     src = pathlib.Path(path).resolve()
+    if UPLOAD_DIR is None and REMOTE:
+        raise ValueError("ve vzdáleném (http) režimu je nahrávání povolené jen z SHOPTET_UPLOAD_DIR – nastav ji")
+    if UPLOAD_DIR is not None and UPLOAD_DIR not in src.parents:
+        raise ValueError(f"soubor musí ležet v SHOPTET_UPLOAD_DIR ({UPLOAD_DIR})")
     forbidden_dirs = [(pathlib.Path.home() / ".ssh").resolve()] + ([ENV_FILE.parent.resolve()] if ENV_FILE else [])
     for forbidden in forbidden_dirs:
         if src == forbidden or forbidden in src.parents:
@@ -634,12 +643,29 @@ def products_import(local_path: str, mode: str = "keep", redirect_urls: bool = T
 
 
 if __name__ == "__main__":
-    if setting("SHOPTET_MCP_TRANSPORT", "stdio") == "http":
-        # vzdálený režim (ChatGPT, web klienti): HTTPS zajisti tunelem nebo reverzní proxy, tajná cesta nahrazuje autentizaci
-        from mcp.server.transport_security import TransportSecuritySettings
-        hosts = [h.strip() for h in setting("SHOPTET_MCP_ALLOWED_HOSTS", "-").split(",") if h.strip() and h.strip() != "-"]
-        server.run("streamable-http", host=setting("SHOPTET_MCP_HOST", "127.0.0.1"), port=int(setting("SHOPTET_MCP_PORT", "8765")),
-                   streamable_http_path=setting("SHOPTET_MCP_PATH", "/mcp"),
-                   transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=bool(hosts), allowed_hosts=hosts))
-    else:
+    if not REMOTE:
         server.run()
+    else:
+        # vzdálený režim (ChatGPT, web klienti): HTTPS zajisti tunelem; tajná cesta je povinná, Bearer token volitelný,
+        # ochrana proti DNS rebindingu vždy zapnutá (povolené hostnames = localhost + SHOPTET_MCP_ALLOWED_HOSTS)
+        import hmac, uvicorn
+        from mcp.server.transport_security import TransportSecuritySettings
+        port = int(setting("SHOPTET_MCP_PORT", "8765"))
+        path = setting("SHOPTET_MCP_PATH", "-")
+        if path == "-" or not re.fullmatch(r"/[A-Za-z0-9_-]{32,}", path):
+            raise SystemExit("SHOPTET_MCP_PATH musí být tajná cesta: lomítko + aspoň 32 náhodných znaků [A-Za-z0-9_-]")
+        token = setting("SHOPTET_MCP_TOKEN", "-")
+        hosts = [f"127.0.0.1:{port}", f"localhost:{port}"] + [h.strip() for h in setting("SHOPTET_MCP_ALLOWED_HOSTS", "-").split(",") if h.strip() and h.strip() != "-"]
+        app = server.streamable_http_app(streamable_http_path=path, transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=[f"http://{h}" for h in hosts] + [f"https://{h}" for h in hosts]))
+
+        async def guarded(scope, receive, send):
+            if scope["type"] == "http" and token != "-":
+                auth = dict(scope.get("headers") or {}).get(b"authorization", b"").decode()
+                if not hmac.compare_digest(auth, f"Bearer {token}"):
+                    await send({"type": "http.response.start", "status": 401, "headers": [(b"content-type", b"text/plain")]})
+                    await send({"type": "http.response.body", "body": b"unauthorized"})
+                    return
+            await app(scope, receive, send)
+
+        uvicorn.run(guarded, host=setting("SHOPTET_MCP_HOST", "127.0.0.1"), port=port, log_level="info")
