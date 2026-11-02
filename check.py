@@ -31,8 +31,8 @@ f = p["fields"]
 assert len(f) > 150 and "internalNote" in f and "pageId[]" in f and isinstance(f["pageId[]"], list), len(f)
 assert "variantAvailabilityId[]" in p["options"] and "pageId[]" in p["options"], list(p["options"])[:20]
 
-r = S.product_update(PID, {"internalNote": "TEST zoe check"})
-assert r["diff"] == {"internalNote": {"before": f["internalNote"], "after": "TEST zoe check"}} and not r["unapplied"], r
+r = S.product_update(PID, {"internalNote": "TEST check"})
+assert r["diff"] == {"internalNote": {"before": f["internalNote"], "after": "TEST check"}} and not r["unapplied"], r
 r = S.product_update(PID, {"internalNote": f["internalNote"]})
 assert r["diff"]["internalNote"]["after"] == f["internalNote"] and not r["errors"], r
 
@@ -58,8 +58,8 @@ r = S.admin_form_update(cat["detail_path"], {})
 assert r["diff"] == {} and not r["errors"], r
 cp = S.admin_list("/admin/slevove-kupony/")["items"][0]
 note = S.admin_form_get(cp["detail_path"], with_options=False)["fields"]["remark"]
-r = S.admin_form_update(cp["detail_path"], {"remark": "TEST zoe admin_form"})
-assert r["diff"] == {"remark": {"before": note, "after": "TEST zoe admin_form"}} and not r["unapplied"], r
+r = S.admin_form_update(cp["detail_path"], {"remark": "TEST admin_form"})
+assert r["diff"] == {"remark": {"before": note, "after": "TEST admin_form"}} and not r["unapplied"], r
 r = S.admin_form_update(cp["detail_path"], {"remark": note})
 assert not r["unapplied"] and r["diff"].get("remark", {}).get("after", note) == note, r
 for bad in ["/neni-admin/", "/admin/kategorie/?action=delete&id=1"]:

@@ -375,7 +375,7 @@ def fm_dialog(folder):
 
 @server.tool()
 def files_list(folder: str = "") -> dict:
-    """Správce souborů (Vzhled a obsah -> Správce souborů): výpis složky, např. "" (kořen) nebo "Fooz/".
+    """Správce souborů (Vzhled a obsah -> Správce souborů): výpis složky, např. "" (kořen) nebo "obrazky/".
     Vrací podsložky a soubory s veřejnou URL (/user/documents/upload/...)."""
     folder = folder.strip("/") + "/" if folder.strip("/") else ""
     soup = fm_dialog(folder)
@@ -473,7 +473,7 @@ def sftp_list(folder: str = "upload") -> dict:
 
 @server.tool()
 def sftp_upload(local_path: str, remote_folder: str = "upload", remote_name: str = "") -> dict:
-    """Nahraje lokální soubor přes SFTP do složky e-shopu (výchozí "upload" = Správce souborů; podsložky jako "upload/Fooz").
+    """Nahraje lokální soubor přes SFTP do složky e-shopu (výchozí "upload" = Správce souborů; podsložky jako "upload/obrazky").
     Složka musí existovat. Vrací veřejnou URL a velikost ověřenou po nahrání."""
     src = safe_local(local_path)
     name = safe_name(remote_name or src.name)
