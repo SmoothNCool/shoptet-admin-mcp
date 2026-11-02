@@ -1,25 +1,27 @@
-r"""MCP server shoptet-admin: úpravy produktů přes administraci Shoptetu (bez Premium / API).
+"""MCP server shoptet-admin: správa Shoptet e-shopu přes jeho administraci (bez Premium API).
 
-Spuštění: uv run --system-certs --with mcp --with requests --with beautifulsoup4 --with paramiko python server.py
-Env: SHOPTET_ADMIN_URL (např. https://www.footic.cz), ADMIN_USER, ADMIN_PASS
-     (chybí-li v prostředí, čtou se z C:\Data\secrets\littleshoes.env).
+Spuštění: uv run --with mcp --with requests --with beautifulsoup4 --with paramiko python server.py
+Konfigurace: proměnné prostředí nebo soubor v SHOPTET_ENV_FILE (formát KEY=value), viz README.md a .env.example.
 """
 import os, re, pathlib
 import requests
 from bs4 import BeautifulSoup
 from mcp.server.mcpserver import MCPServer
 
-SECRETS = pathlib.Path(r"C:\Data\secrets\littleshoes.env")
+ENV_FILE = pathlib.Path(os.environ["SHOPTET_ENV_FILE"]) if os.environ.get("SHOPTET_ENV_FILE") else None
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"
 
 
-def setting(key):
+def setting(key, default=None):
     if os.environ.get(key):
         return os.environ[key]
-    for line in SECRETS.read_text(encoding="utf-8").splitlines():
-        if line.startswith(key + "="):
-            return line.split("=", 1)[1].strip().strip('"')
-    raise RuntimeError(f"chybí {key} (env nebo {SECRETS})")
+    if ENV_FILE and ENV_FILE.is_file():
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            if line.startswith(key + "="):
+                return line.split("=", 1)[1].strip().strip('"')
+    if default is not None:
+        return default
+    raise RuntimeError(f"chybí {key} (nastav proměnnou prostředí nebo řádek v SHOPTET_ENV_FILE)")
 
 
 SHOP = setting("SHOPTET_ADMIN_URL").rstrip("/")
@@ -38,8 +40,8 @@ class Admin:
 
     def login(self):
         token = csrf(self.s.get(f"{SHOP}/admin/login/").text)
-        r = self.s.post(f"{SHOP}/admin/login/", data={"action": "login", "email": setting("ADMIN_USER"),
-                                                      "password": setting("ADMIN_PASS"), "__csrf__": token})
+        r = self.s.post(f"{SHOP}/admin/login/", data={"action": "login", "email": setting("SHOPTET_ADMIN_USER"),
+                                                      "password": setting("SHOPTET_ADMIN_PASS"), "__csrf__": token})
         if "/admin/login/" in r.url or 'name="password"' in r.text:
             raise RuntimeError(f"přihlášení do {SHOP} selhalo (status {r.status_code})")
 
@@ -115,8 +117,9 @@ def values_by_name(fields):
     return {k: v[0] if len(v) == 1 and not k.endswith("[]") else v for k, v in d.items()}
 
 
-server = MCPServer("shoptet-admin", instructions=f"Úpravy produktů v administraci {SHOP} (bez API). "
-                   "Postup: product_find -> product_get -> product_update. Změny jen po potvrzení uživatelem.")
+server = MCPServer("shoptet-admin", instructions=f"Správa Shoptet e-shopu {SHOP} přes jeho administraci (bez API). "
+                   "Produkty: product_find -> product_get -> product_update; hromadně products_bulk_update nejdřív bez apply. "
+                   "Každá změna mění živý e-shop: provádět jen po výslovném potvrzení uživatelem a kontrolovat vrácený diff.")
 
 
 FILTERS = {"brand": "manufacturerId", "category": "defaultCategoryId", "availability_sold_out": "availabilityId",
@@ -196,9 +199,10 @@ def safe_path(path):
 
 
 def safe_local(path):
-    """Soubor k nahrání: nikdy nic ze složky s přístupy, z ~/.ssh ani .env soubory."""
+    """Soubor k nahrání: nikdy nic ze složky se SHOPTET_ENV_FILE, z ~/.ssh ani .env soubory."""
     src = pathlib.Path(path).resolve()
-    for forbidden in (SECRETS.parent.resolve(), (pathlib.Path.home() / ".ssh").resolve()):
+    forbidden_dirs = [(pathlib.Path.home() / ".ssh").resolve()] + ([ENV_FILE.parent.resolve()] if ENV_FILE else [])
+    for forbidden in forbidden_dirs:
         if src == forbidden or forbidden in src.parents:
             raise ValueError(f"soubor z {forbidden} se nahrávat nesmí")
     if src.name.startswith(".env") or not src.is_file():
@@ -436,25 +440,20 @@ def files_create_folder(name: str, parent: str = "") -> dict:
 
 
 # SFTP (Shoptet: sftp://ftp.myshoptet.com, port 22; kořen = /user/documents/, složka upload = Správce souborů)
-SFTP_PREFIX = {"littleshoes.cz": "LSCZ", "littleshoes.sk": "LSSK", "footic.cz": "FOOTICCZ", "footic.de": "FOOTICDE",
-               "footic.pl": "FOOTICPL", "footic.com": "FOOTICCOM"}
-
-
 # otisk ed25519 klíče ftp.myshoptet.com (admin: Nastavení -> Hosting -> FTP); jiný klíč = nepřipojovat
-SFTP_HOST_KEY_SHA256 = os.environ.get("SHOPTET_SFTP_HOST_KEY_SHA256", "bNX2DEUrb+uve8s22CVEa8Z1dzLAjUZKQXEpj5wLOxU")
+SFTP_HOST_KEY_SHA256 = setting("SHOPTET_SFTP_HOST_KEY_SHA256", "bNX2DEUrb+uve8s22CVEa8Z1dzLAjUZKQXEpj5wLOxU")
 
 
 def sftp_client():
     import paramiko, hashlib, base64
-    pre = SFTP_PREFIX[SHOP.replace("https://www.", "")]
-    host = setting(f"{pre}_FTP_HOST").replace("sftp://", "").replace("ftp://", "")
+    host = setting("SHOPTET_SFTP_HOST", "ftp.myshoptet.com").replace("sftp://", "").replace("ftp://", "")
     t = paramiko.Transport((host, 22))
     t.start_client()
     got = base64.b64encode(hashlib.sha256(t.get_remote_server_key().asbytes()).digest()).decode().rstrip("=")
     if got != SFTP_HOST_KEY_SHA256:
         t.close()
         raise RuntimeError(f"SFTP klíč serveru nesedí ({got}), možný MITM – ověř otisk v adminu a nastav SHOPTET_SFTP_HOST_KEY_SHA256")
-    t.auth_password(setting(f"{pre}_FTP_USER"), setting(f"{pre}_FTP_PASS"))
+    t.auth_password(setting("SHOPTET_SFTP_USER"), setting("SHOPTET_SFTP_PASS"))
     return t, paramiko.SFTPClient.from_transport(t)
 
 
@@ -493,7 +492,7 @@ def sftp_upload(local_path: str, remote_folder: str = "upload", remote_name: str
 
 
 # Export produktů (Produkty -> Export): admin vrátí soubor rovnou v odpovědi
-EXPORT_DIR = pathlib.Path(os.environ.get("SHOPTET_EXPORT_DIR", pathlib.Path.home() / "Downloads" / "shoptet-export"))
+EXPORT_DIR = pathlib.Path(setting("SHOPTET_EXPORT_DIR", str(pathlib.Path.home() / "Downloads" / "shoptet-export")))
 EXPORT_FILTERS = {"brand": "manufacturerId", "category": "categoryId", "default_category": "defaultCategoryId",
                   "availability_sold_out": "availabilityId", "availability_in_stock": "availabilityInStockId",
                   "visibility": "visibilityId", "stock_state": "stockState", "item_type": "itemTypeId"}
@@ -635,4 +634,12 @@ def products_import(local_path: str, mode: str = "keep", redirect_urls: bool = T
 
 
 if __name__ == "__main__":
-    server.run()
+    if setting("SHOPTET_MCP_TRANSPORT", "stdio") == "http":
+        # vzdálený režim (ChatGPT, web klienti): HTTPS zajisti tunelem nebo reverzní proxy, tajná cesta nahrazuje autentizaci
+        from mcp.server.transport_security import TransportSecuritySettings
+        hosts = [h.strip() for h in setting("SHOPTET_MCP_ALLOWED_HOSTS", "-").split(",") if h.strip() and h.strip() != "-"]
+        server.run("streamable-http", host=setting("SHOPTET_MCP_HOST", "127.0.0.1"), port=int(setting("SHOPTET_MCP_PORT", "8765")),
+                   streamable_http_path=setting("SHOPTET_MCP_PATH", "/mcp"),
+                   transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=bool(hosts), allowed_hosts=hosts))
+    else:
+        server.run()
