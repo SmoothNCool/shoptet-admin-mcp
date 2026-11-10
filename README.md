@@ -25,7 +25,9 @@ Na Windows s antivirem, který podepisuje TLS vlastní certifikátem (Norton apo
 
 ## Konfigurace
 
-Zkopíruj `.env.example` do vlastního souboru **mimo repozitář** (třeba `C:\secrets\shoptet-mujeshop.env`), vyplň ho a cestu předej v proměnné `SHOPTET_ENV_FILE`. Stejné klíče jdou nastavit i přímo jako proměnné prostředí, ty mají přednost. Jeden soubor = jeden e-shop; pro víc e-shopů spustíš server vícekrát s jiným souborem.
+Zkopíruj `.env.example` do vlastního souboru **mimo repozitář** (třeba `C:\secrets\shoptet-mujeshop.env`), vyplň ho a cestu předej v proměnné `SHOPTET_ENV_FILE`. Stejné klíče jdou nastavit i přímo jako proměnné prostředí, ty mají přednost. Jeden soubor = jeden e-shop.
+
+**Víc e-shopů v jednom serveru:** místo `SHOPTET_ENV_FILE` nastav `SHOPTET_ENV_FILES="cz=C:\secrets\shop-cz.env;de=C:\secrets\shop-de.env"`. Každý nástroj pak má povinný parametr `eshop` (`cz`, `de`…), přihlášení drží server pro každý e-shop zvlášť. Společná nastavení (export, upload, HTTP režim) se berou z prvního souboru. Jeden proces místo několika šetří paměť.
 
 | Proměnná | Povinná | Význam |
 |---|---|---|
@@ -47,6 +49,8 @@ Zkopíruj `.env.example` do vlastního souboru **mimo repozitář** (třeba `C:\
 ```
 claude mcp add shoptet-mujeshop -s user -e SHOPTET_ENV_FILE=C:\secrets\shoptet-mujeshop.env -- uv run --with mcp --with requests --with beautifulsoup4 --with paramiko python C:\cesta\k\shoptet-admin\server.py
 ```
+
+Víc e-shopů najednou: stejný příkaz s `-e SHOPTET_ENV_FILES="cz=C:\secrets\shop-cz.env;de=C:\secrets\shop-de.env"`.
 
 ### Claude Desktop
 
