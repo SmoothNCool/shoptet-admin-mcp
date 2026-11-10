@@ -3,12 +3,16 @@
 Spuštění: uv run --with mcp --with requests --with beautifulsoup4 --with paramiko python server.py
 Konfigurace: proměnné prostředí nebo soubor v SHOPTET_ENV_FILE (formát KEY=value), viz README.md a .env.example.
 """
-import os, re, pathlib
+import os, re, pathlib, inspect, threading
 import requests
 from bs4 import BeautifulSoup
 from mcp.server.mcpserver import MCPServer
 
 ENV_FILE = pathlib.Path(os.environ["SHOPTET_ENV_FILE"]) if os.environ.get("SHOPTET_ENV_FILE") else None
+# víc e-shopů v jednom procesu: SHOPTET_ENV_FILES="jmeno=cesta.env;jmeno2=cesta2.env", nástroje pak mají parametr eshop
+SHOPS = dict(x.strip().split("=", 1) for x in os.environ.get("SHOPTET_ENV_FILES", "").split(";") if x.strip())
+if SHOPS:
+    ENV_FILE = pathlib.Path(next(iter(SHOPS.values())))
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"
 
 
@@ -59,6 +63,16 @@ class Admin:
 
 
 admin = Admin()
+admins, lock = {}, threading.Lock()
+
+
+def use_shop(eshop):
+    global ENV_FILE, SHOP, admin
+    if eshop not in SHOPS:
+        raise ValueError(f"eshop musí být jedno z {list(SHOPS)}")
+    ENV_FILE = pathlib.Path(SHOPS[eshop])
+    SHOP = setting("SHOPTET_ADMIN_URL").rstrip("/")
+    admin = admins.setdefault(eshop, Admin())
 
 
 def parse_form(html):
@@ -117,9 +131,30 @@ def values_by_name(fields):
     return {k: v[0] if len(v) == 1 and not k.endswith("[]") else v for k, v in d.items()}
 
 
-server = MCPServer("shoptet-admin", instructions=f"Správa Shoptet e-shopu {SHOP} přes jeho administraci (bez API). "
+server = MCPServer("shoptet-admin", instructions=(f"Správa Shoptet e-shopů {', '.join(SHOPS)} (parametr eshop u každého nástroje)"
+                   if SHOPS else f"Správa Shoptet e-shopu {SHOP}") + " přes administraci (bez API). "
                    "Produkty: product_find -> product_get -> product_update; hromadně products_bulk_update nejdřív bez apply. "
                    "Každá změna mění živý e-shop: provádět jen po výslovném potvrzení uživatelem a kontrolovat vrácený diff.")
+
+
+def tool():
+    """server.tool(); s víc e-shopy přidá povinný parametr eshop. Vrací původní funkci, aby se nástroje mohly volat navzájem."""
+    def deco(fn):
+        if not SHOPS:
+            return server.tool()(fn)
+
+        def wrapper(eshop: str, **kwargs):
+            with lock:
+                use_shop(eshop)
+                return fn(**kwargs)
+        sig = inspect.signature(fn)
+        wrapper.__name__, wrapper.__doc__ = fn.__name__, f"eshop: {', '.join(SHOPS)}. " + (fn.__doc__ or "")
+        wrapper.__signature__ = sig.replace(parameters=[inspect.Parameter("eshop", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
+                                                        *sig.parameters.values()])
+        wrapper.__annotations__ = {"eshop": str, **fn.__annotations__}
+        server.tool()(wrapper)
+        return fn
+    return deco
 
 
 FILTERS = {"brand": "manufacturerId", "category": "defaultCategoryId", "availability_sold_out": "availabilityId",
@@ -146,13 +181,13 @@ def resolve(options, label):
     return hits[0]
 
 
-@server.tool()
+@tool()
 def filter_options() -> dict:
     """Povolené hodnoty filtrů pro product_find (značky, kategorie, dostupnosti, viditelnost, stav skladu...) jako {id: popisek}."""
     return filter_form_options()
 
 
-@server.tool()
+@tool()
 def product_find(code: str = "", name: str = "", brand: str = "", category: str = "", availability_sold_out: str = "",
                  availability_in_stock: str = "", visibility: str = "", stock_state: str = "", supplier: str = "",
                  item_type: str = "", max_pages: int = 4) -> dict:
@@ -266,21 +301,21 @@ def form_update(path, changes):
     return {"status": r.status_code, "diff": diff, "errors": errors[:5], "unapplied": unapplied}
 
 
-@server.tool()
+@tool()
 def product_get(product_id: int, with_options: bool = True) -> dict:
     """Vrátí všechna pole produktového formuláře (varianty, dostupnosti, kategorie pageId[], parametry...).
     `options` = povolené hodnoty pro výběrová/zaškrtávací pole; klíč je jméno pole s [N] nahrazeným [] (sdílené pro varianty)."""
     return {"id": product_id, **form_get(f"/admin/produkty-detail/?id={product_id}", with_options)}
 
 
-@server.tool()
+@tool()
 def product_update(product_id: int, changes: dict[str, str | list[str]]) -> dict:
     """Změní zadaná pole produktu (jméno pole -> hodnota; u polí s více hodnotami, např. pageId[], je seznam kompletní nový výběr)
     a uloží celý formulář. Vrací diff před/po uložení, který musí odpovídat požadovaným změnám."""
     return form_update(f"/admin/produkty-detail/?id={product_id}", changes)
 
 
-@server.tool()
+@tool()
 def admin_sections() -> dict:
     """Mapa administrace: cesta -> název sekce (stránky, články, kategorie, značky, kupony, objednávky, vzhled...).
     Seznamy čti přes admin_list, detaily přes admin_form_get / admin_form_update."""
@@ -294,7 +329,7 @@ def admin_sections() -> dict:
     return out
 
 
-@server.tool()
+@tool()
 def admin_list(path: str, page: int = 1) -> dict:
     """Přehledová stránka adminu (např. /admin/stranky/, /admin/kategorie/, /admin/znacky/, /admin/slevove-kupony/):
     vrátí řádky tabulky s odkazem na detail (id, detail_path, text řádku). Filtry lze předat v cestě jako f[pole]=hodnota, stránka = from."""
@@ -315,14 +350,14 @@ def admin_list(path: str, page: int = 1) -> dict:
     return {"total": int(m.group(1).replace(" ", "")) if m else len(items), "page": page, "items": items}
 
 
-@server.tool()
+@tool()
 def admin_form_get(path: str, with_options: bool = True) -> dict:
     """Načte formulář #main-form na libovolné stránce adminu (detail stránky/článku/kategorie/značky/kuponu, Titulní strana,
     Editor vzhledu...). Vrací fields a options stejně jako product_get."""
     return form_get(path, with_options)
 
 
-@server.tool()
+@tool()
 def admin_form_update(path: str, changes: dict[str, str | list[str]]) -> dict:
     """Změní pole formuláře #main-form na dané stránce adminu a uloží ho; vrací diff před/po. Funguje všude, kde admin_form_get
     vrátí formulář. Mění živý e-shop, používat jen po potvrzení uživatelem a kontrolovat diff."""
@@ -348,7 +383,7 @@ def expand(product_fields, changes, only_if):
     return out
 
 
-@server.tool()
+@tool()
 def products_bulk_update(product_ids: list[int], changes: dict[str, str | list[str]], only_if: dict[str, str] | None = None,
                          apply: bool = False) -> dict:
     """Hromadná změna přes více produktů. Klíče v changes mohou mít [*] = všechny varianty (např. variantAvailabilityId[*]);
@@ -382,7 +417,7 @@ def fm_dialog(folder):
     return BeautifulSoup(r.text, "html.parser")
 
 
-@server.tool()
+@tool()
 def files_list(folder: str = "") -> dict:
     """Správce souborů (Vzhled a obsah -> Správce souborů): výpis složky, např. "" (kořen) nebo "obrazky/".
     Vrací podsložky a soubory s veřejnou URL (/user/documents/upload/...)."""
@@ -401,7 +436,7 @@ def files_list(folder: str = "") -> dict:
     return {"folder": folder, "folders": folders, "files": files}
 
 
-@server.tool()
+@tool()
 def files_upload(local_path: str, folder: str = "") -> dict:
     """Nahraje lokální soubor (obrázek, PDF...) do správce souborů e-shopu do dané složky (musí existovat). Vrací veřejnou URL."""
     folder = folder.strip("/") + "/" if folder.strip("/") else ""
@@ -418,7 +453,7 @@ def files_upload(local_path: str, folder: str = "") -> dict:
             "response": r.text[:200] if not ok else ""}
 
 
-@server.tool()
+@tool()
 def admin_form_create(path: str, changes: dict[str, str | list[str]]) -> dict:
     """Založí nový záznam přes prázdný formulář #main-form (např. /admin/stranka-detail/ bez id = nová stránka):
     vyplní zadaná pole a odešle. Vrací URL po uložení (obsahuje id nového záznamu) a případné chyby. Mění živý e-shop."""
@@ -437,7 +472,7 @@ def admin_form_create(path: str, changes: dict[str, str | list[str]]) -> dict:
     return {"status": r.status_code, "url": r.url, "id": int(m.group(1)) if m else None, "errors": errors[:5]}
 
 
-@server.tool()
+@tool()
 def files_create_folder(name: str, parent: str = "") -> dict:
     """Založí novou složku ve správci souborů (v kořeni nebo v existující složce parent). Vrací, zda po založení existuje."""
     parent = parent.strip("/") + "/" if parent.strip("/") else ""
@@ -466,7 +501,7 @@ def sftp_client():
     return t, paramiko.SFTPClient.from_transport(t)
 
 
-@server.tool()
+@tool()
 def sftp_list(folder: str = "upload") -> dict:
     """Výpis složky přes SFTP e-shopu (kořen = /user/documents/; "upload" = Správce souborů). Vrací soubory s velikostí a veřejnou URL."""
     c, s = sftp_client()
@@ -480,7 +515,7 @@ def sftp_list(folder: str = "upload") -> dict:
             "files": sorted(({"name": i.filename, "size": i.st_size, "url": base + requests.utils.quote(i.filename)} for i in items if not stat.S_ISDIR(i.st_mode)), key=lambda x: x["name"])}
 
 
-@server.tool()
+@tool()
 def sftp_upload(local_path: str, remote_folder: str = "upload", remote_name: str = "") -> dict:
     """Nahraje lokální soubor přes SFTP do složky e-shopu (výchozí "upload" = Správce souborů; podsložky jako "upload/obrazky").
     Složka musí existovat. Vrací veřejnou URL a velikost ověřenou po nahrání."""
@@ -519,14 +554,14 @@ def export_form():
     return html, templates
 
 
-@server.tool()
+@tool()
 def export_templates() -> dict:
     """Šablony exportu produktů dostupné v adminu (hodnota -> popisek). Systémové mají záporné ID a jsou na všech webech,
     vlastní šablony se po webech liší. Výchozí pro products_export je kompletní XML (productsComplete;-5;xml)."""
     return export_form()[1]
 
 
-@server.tool()
+@tool()
 def products_export(template: str = "productsComplete;-5;xml", format: str = "", code: str = "", name: str = "", brand: str = "",
                     category: str = "", default_category: str = "", availability_sold_out: str = "", availability_in_stock: str = "",
                     visibility: str = "", stock_state: str = "", item_type: str = "", only_visible: bool = False,
@@ -589,7 +624,7 @@ def inertia_get(path, version):
     return r.json()
 
 
-@server.tool()
+@tool()
 def products_import_log(limit: int = 20) -> dict:
     """Log importu produktů (Produkty -> Import -> Log): poslední záznamy s úrovní (1 info, 2 varování, 4 chyba) a stav zámku importu."""
     page = inertia_page("/admin/import-produktu/")
@@ -600,7 +635,7 @@ def products_import_log(limit: int = 20) -> dict:
                       "message": re.sub(r"<[^>]+>", "", x["title"])} for x in logs]}
 
 
-@server.tool()
+@tool()
 def products_import(local_path: str, mode: str = "keep", redirect_urls: bool = True, change_url_by_name: bool = False,
                     apply_empty_values: bool = False, wait_seconds: int = 60) -> dict:
     """Nahraje CSV/XLSX/XML do importu produktů a spustí ho. mode: keep = produkty mimo soubor nechat (výchozí, bezpečné),
