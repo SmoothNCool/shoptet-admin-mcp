@@ -138,6 +138,7 @@ def values_by_name(fields):
 server = MCPServer("shoptet-admin", instructions=(f"Správa Shoptet e-shopů {', '.join(SHOPS)} (parametr eshop u každého nástroje)"
                    if SHOPS else f"Správa Shoptet e-shopu {SHOP}") + " přes administraci (bez API). "
                    "Produkty: product_find -> product_get -> product_update; hromadně products_bulk_update nejdřív bez apply. "
+                   "Mazání produktu product_delete: nejdřív bez apply, smazat až po potvrzení konkrétního názvu a kódů. "
                    "Každá změna mění živý e-shop: provádět jen po výslovném potvrzení uživatelem a kontrolovat vrácený diff.")
 
 
@@ -317,6 +318,26 @@ def product_update(product_id: int, changes: dict[str, str | list[str]]) -> dict
     """Změní zadaná pole produktu (jméno pole -> hodnota; u polí s více hodnotami, např. pageId[], je seznam kompletní nový výběr)
     a uloží celý formulář. Vrací diff před/po uložení, který musí odpovídat požadovaným změnám."""
     return form_update(f"/admin/produkty-detail/?id={product_id}", changes)
+
+
+@tool()
+def product_delete(product_id: int, apply: bool = False) -> dict:
+    """NEVRATNĚ smaže produkt i se všemi variantami. Bez apply jen vrátí, co by se smazalo (název, kódy);
+    s apply=True smaže (jako tlačítko Smazat v detailu) a ověří, že produkt v adminu už není."""
+    path = f"/admin/produkty-detail/?id={product_id}"
+    html = admin.get(path)
+    soup = BeautifulSoup(html, "html.parser")
+    name = soup.select_one("#main-form input[name='name']")
+    if not name:
+        raise ValueError(f"produkt {product_id} neexistuje")
+    codes = [i.get("value") for i in soup.select("input[name='code'], input[name^='variantCode[']") if i.get("value")]
+    plan = {"id": product_id, "name": name.get("value"), "codes": codes}
+    if not apply:
+        return {**plan, "deleted": False}
+    r = admin.s.post(f"{SHOP}{path}&action=delete", data={"id": str(product_id), "__csrf__": csrf(html)},
+                     headers={"Referer": SHOP + path, "Origin": SHOP})
+    gone = not BeautifulSoup(admin.get(path), "html.parser").select_one("#main-form input[name='name']")
+    return {**plan, "status": r.status_code, "deleted": gone}
 
 
 @tool()
@@ -596,7 +617,8 @@ def products_export(template: str = "productsComplete;-5;xml", format: str = "",
         return {"error": f"admin nevrátil soubor (status {r.status_code}, content-type {r.headers.get('content-type')})"}
     ext = re.search(r'filename="[^"]*\.(\w+)"', cd).group(1)
     import datetime
-    out = pathlib.Path(out_path) if out_path else EXPORT_DIR / f"{re.sub(r'^https?://(www\.)?', '', SHOP)}-{template.split(';')[1]}-{datetime.datetime.now():%Y%m%d-%H%M%S}.{ext}"
+    host = re.sub(r"^https?://(www\.)?", "", SHOP)
+    out = pathlib.Path(out_path) if out_path else EXPORT_DIR / f"{host}-{template.split(';')[1]}-{datetime.datetime.now():%Y%m%d-%H%M%S}.{ext}"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(r.content)
     info = {"path": str(out), "bytes": len(r.content), "format": ext}

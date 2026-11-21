@@ -69,4 +69,10 @@ for bad in ["/neni-admin/", "/admin/kategorie/?action=delete&id=1"]:
         pass
 assert "error" in S.product_update(PID, {"neexistujici_pole": "x"})
 assert "error" in S.product_update(PID, {"visibility": "999999"})
-print("OK: find+filtry/get/update/revert/bulk/admin_list/admin_form/validace")
+d = S.product_delete(PID)  # jen náhled, bez apply se nesmí nic smazat
+assert d["deleted"] is False and d["codes"] and S.product_find(code=CODE)["total"] == 1, d
+try:
+    S.product_delete(999999999); assert False
+except ValueError:
+    pass
+print("OK: find+filtry/get/update/revert/bulk/admin_list/admin_form/delete-náhled/validace")

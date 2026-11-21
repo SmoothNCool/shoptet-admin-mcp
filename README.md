@@ -11,7 +11,7 @@ Funguje s Claude Code, Claude Desktop a (ve vzdáleném režimu) s ChatGPT nebo 
 - **Mění živý e-shop.** Každé uložení je stejné jako kliknutí na Uložit v adminu. Nástroje vrací diff před/po, aby šlo každou změnu zkontrolovat, ale neexistuje tlačítko Zpět. Používej samostatný administrátorský účet pro robota a před hromadnou změnou si udělej export.
 - **Shoptet drží jeden aktivní session na uživatele.** Když se server přihlásí účtem, který máš otevřený v prohlížeči, prohlížeč tě odhlásí. Další důvod pro samostatný účet.
 - **Není to oficiální API.** Server čte a odesílá formuláře administrace. Když Shoptet admin změní, některý nástroj může přestat fungovat, dokud se neupraví. Je to tvoje odpovědnost i riziko.
-- Server nic **nemaže** (záměrně) a odmítá adresy s parametrem `action` (tudy jdou v adminu mazání a přepínání).
+- Maže jen produkty, a to vyhrazeným nástrojem `product_delete` (bez `apply` jen náhled). Obecné nástroje odmítají adresy s parametrem `action` (tudy jdou v adminu mazání a přepínání).
 
 ## Instalace
 
@@ -87,6 +87,7 @@ Stejnou adresu použije kterýkoli jiný klient s podporou MCP přes streamable 
 | `filter_options()` | povolené hodnoty filtrů (značky, kategorie, dostupnosti, viditelnost…) |
 | `product_get(product_id)` | všechna pole produktového formuláře (varianty, dostupnosti, kategorie `pageId[]`, parametry…) a povolené hodnoty výběrových polí |
 | `product_update(product_id, changes)` | změní zadaná pole a uloží celý formulář; vrací diff před/po, `errors`, `unapplied` |
+| `product_delete(product_id, apply)` | **nevratně** smaže produkt i s variantami; bez `apply` jen vrátí název a kódy, s `apply` smaže a ověří `deleted` |
 | `products_bulk_update(product_ids, changes, only_if, apply)` | hromadná změna; `[*]` v klíči = všechny varianty, `only_if` = podmínka na aktuální hodnotu, bez `apply` jen plán |
 | `admin_sections()` | mapa administrace (cesta → název) |
 | `admin_list(path, page)` | řádky přehledové stránky s odkazy na detail (stránky, články, kategorie, značky, kupóny…) |
@@ -145,6 +146,6 @@ MIT (viz `LICENSE`). Autor: David Zelenka. Chyby a nápady posílej jako issue; 
 ## Omezení
 
 - Nezakládá produkty ani varianty přes formulář (admin je staví JavaScriptem); na to je `products_import`.
-- Nemaže nic (záměrně).
+- Kromě produktů nemaže nic (stránky, kategorie, kupóny…).
 - Hledání vrací jen přehledové sloupce; detail dá `product_get`.
 - Vlastní šablony exportu mají na každém e-shopu jiné ID; systémové (záporné) jsou všude stejné.
