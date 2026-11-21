@@ -596,7 +596,7 @@ def products_export(template: str = "productsComplete;-5;xml", format: str = "",
         return {"error": f"admin nevrátil soubor (status {r.status_code}, content-type {r.headers.get('content-type')})"}
     ext = re.search(r'filename="[^"]*\.(\w+)"', cd).group(1)
     import datetime
-    out = pathlib.Path(out_path) if out_path else EXPORT_DIR / f"{SHOP.replace('https://www.', '')}-{template.split(';')[1]}-{datetime.datetime.now():%Y%m%d-%H%M%S}.{ext}"
+    out = pathlib.Path(out_path) if out_path else EXPORT_DIR / f"{re.sub(r'^https?://(www\.)?', '', SHOP)}-{template.split(';')[1]}-{datetime.datetime.now():%Y%m%d-%H%M%S}.{ext}"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(r.content)
     info = {"path": str(out), "bytes": len(r.content), "format": ext}
