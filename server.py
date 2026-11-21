@@ -321,9 +321,9 @@ def product_update(product_id: int, changes: dict[str, str | list[str]]) -> dict
 
 
 @tool()
-def product_delete(product_id: int, apply: bool = False) -> dict:
+def product_delete(product_id: int, apply: bool = False, confirm_name: str = "") -> dict:
     """NEVRATNĚ smaže produkt i se všemi variantami. Bez apply jen vrátí, co by se smazalo (název, kódy);
-    s apply=True smaže (jako tlačítko Smazat v detailu) a ověří, že produkt v adminu už není."""
+    s apply=True a confirm_name = přesný název z náhledu smaže (jako tlačítko Smazat v detailu) a ověří, že produkt už není."""
     path = f"/admin/produkty-detail/?id={product_id}"
     html = admin.get(path)
     soup = BeautifulSoup(html, "html.parser")
@@ -334,6 +334,8 @@ def product_delete(product_id: int, apply: bool = False) -> dict:
     plan = {"id": product_id, "name": name.get("value"), "codes": codes}
     if not apply:
         return {**plan, "deleted": False}
+    if confirm_name != plan["name"]:
+        raise ValueError(f"confirm_name musí být přesně '{plan['name']}' (název z náhledu), nic nesmazáno")
     r = admin.s.post(f"{SHOP}{path}&action=delete", data={"id": str(product_id), "__csrf__": csrf(html)},
                      headers={"Referer": SHOP + path, "Origin": SHOP})
     gone = not BeautifulSoup(admin.get(path), "html.parser").select_one("#main-form input[name='name']")

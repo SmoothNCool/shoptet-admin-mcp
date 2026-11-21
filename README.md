@@ -87,7 +87,7 @@ Stejnou adresu použije kterýkoli jiný klient s podporou MCP přes streamable 
 | `filter_options()` | povolené hodnoty filtrů (značky, kategorie, dostupnosti, viditelnost…) |
 | `product_get(product_id)` | všechna pole produktového formuláře (varianty, dostupnosti, kategorie `pageId[]`, parametry…) a povolené hodnoty výběrových polí |
 | `product_update(product_id, changes)` | změní zadaná pole a uloží celý formulář; vrací diff před/po, `errors`, `unapplied` |
-| `product_delete(product_id, apply)` | **nevratně** smaže produkt i s variantami; bez `apply` jen vrátí název a kódy, s `apply` smaže a ověří `deleted` |
+| `product_delete(product_id, apply, confirm_name)` | **nevratně** smaže produkt i s variantami; bez `apply` jen vrátí název a kódy, s `apply` a přesným názvem v `confirm_name` smaže a ověří `deleted` |
 | `products_bulk_update(product_ids, changes, only_if, apply)` | hromadná změna; `[*]` v klíči = všechny varianty, `only_if` = podmínka na aktuální hodnotu, bez `apply` jen plán |
 | `admin_sections()` | mapa administrace (cesta → název) |
 | `admin_list(path, page)` | řádky přehledové stránky s odkazy na detail (stránky, články, kategorie, značky, kupóny…) |

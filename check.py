@@ -75,4 +75,12 @@ try:
     S.product_delete(999999999); assert False
 except ValueError:
     pass
+post = S.admin.s.post  # pojistka testu: kdyby kontrola názvu selhala, nic se neodešle
+S.admin.s.post = lambda *a, **k: (_ for _ in ()).throw(AssertionError("delete bez potvrzení došel k POST"))
+for wrong in ["", d["name"] + "x"]:
+    try:
+        S.product_delete(PID, apply=True, confirm_name=wrong); assert False
+    except ValueError:
+        pass
+S.admin.s.post = post
 print("OK: find+filtry/get/update/revert/bulk/admin_list/admin_form/delete-náhled/validace")
