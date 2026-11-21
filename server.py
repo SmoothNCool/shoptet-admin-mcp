@@ -10,9 +10,12 @@ from mcp.server.mcpserver import MCPServer
 
 ENV_FILE = pathlib.Path(os.environ["SHOPTET_ENV_FILE"]) if os.environ.get("SHOPTET_ENV_FILE") else None
 # víc e-shopů v jednom procesu: SHOPTET_ENV_FILES="jmeno=cesta.env;jmeno2=cesta2.env", nástroje pak mají parametr eshop
+# sdílený soubor pro víc e-shopů: "jmeno=cesta.env|PREDPONA_" čte z něj PREDPONA_SHOPTET_ADMIN_URL atd.
 SHOPS = dict(x.strip().split("=", 1) for x in os.environ.get("SHOPTET_ENV_FILES", "").split(";") if x.strip())
+PREFIX = ""
 if SHOPS:
-    ENV_FILE = pathlib.Path(next(iter(SHOPS.values())))
+    path, _, PREFIX = next(iter(SHOPS.values())).partition("|")
+    ENV_FILE = pathlib.Path(path)
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"
 
 
@@ -21,7 +24,7 @@ def setting(key, default=None):
         return os.environ[key]
     if ENV_FILE and ENV_FILE.is_file():
         for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
-            if line.startswith(key + "="):
+            if line.startswith(PREFIX + key + "="):
                 return line.split("=", 1)[1].strip().strip('"')
     if default is not None:
         return default
@@ -67,10 +70,11 @@ admins, lock = {}, threading.Lock()
 
 
 def use_shop(eshop):
-    global ENV_FILE, SHOP, admin
+    global ENV_FILE, PREFIX, SHOP, admin
     if eshop not in SHOPS:
         raise ValueError(f"eshop musí být jedno z {list(SHOPS)}")
-    ENV_FILE = pathlib.Path(SHOPS[eshop])
+    path, _, PREFIX = SHOPS[eshop].partition("|")
+    ENV_FILE = pathlib.Path(path)
     SHOP = setting("SHOPTET_ADMIN_URL").rstrip("/")
     admin = admins.setdefault(eshop, Admin())
 
